@@ -4,6 +4,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using Telegram.Bot.Types.ReplyMarkups;
 
 namespace SlowMarketWatcher
 {
@@ -12,14 +13,14 @@ namespace SlowMarketWatcher
     /// new market data.
     class SlowMarketWatcherBot
     {
-        private TelegramBotClient botClient;
-        private ConcurrentBag<long> ids; // TODO: use hashmap from ids to delegate functions? i.e. to allow unsubscribe.
+        private ITelegramBotClient botClient;
+        private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
         private MarketData eventPublisher;
 
         public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher)
         {
             botClient = new TelegramBotClient(telegramAccessToken);
-            ids = new ConcurrentBag<long>();
+            handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             eventPublisher = publisher;
         }
 
@@ -49,9 +50,9 @@ namespace SlowMarketWatcher
 
         private async Task Stop(ITelegramBotClient bot, CancellationTokenSource cts)
         {
-            foreach (var id in ids)
+            foreach (var id in handlerDictionary.Keys)
             {
-                await bot.SendTextMessageAsync(id, "Shutting down, you may need to reactivate me later.");
+                await bot.SendTextMessageAsync(id, "Shutting down, you may need to reactivate me later.", replyMarkup: new ReplyKeyboardMarkup(new KeyboardButton("Start")));
             }
 
             cts.Cancel();
@@ -66,26 +67,43 @@ namespace SlowMarketWatcher
 
             var chatId = message.Chat.Id;
 
+            var replyMarkup = new ReplyKeyboardMarkup(new [] { new KeyboardButton("Start"), new KeyboardButton("Stop") }) { ResizeKeyboard = true };
             string toSend;
             switch (messageText.ToLower())
             {
                 case "start":
                     {
-                        if (ids.Contains(chatId))
+                        if (handlerDictionary.ContainsKey(chatId))
                         {
                             toSend = $"Already activated this chat ({chatId}).";
                         }
                         else
                         {
-                            eventPublisher.RaiseMarketDataEvent += (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message);
+                            EventHandler<MarketDataEventArgs> newHandler = (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message);
+                            if (!handlerDictionary.TryAdd(chatId, newHandler))
+                            {
+                                throw new Exception("Should be able to add new handler.");
+                            }
+                            eventPublisher.RaiseMarketDataEvent += newHandler;
                             toSend = $"Subscribing... (Chat: {chatId})";
-                            ids.Add(chatId);
+                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Stop"));
                         }
                         break;
                     }
                 case "stop":
                     {
-                        toSend = "Unimplemented";
+                        if (handlerDictionary.TryGetValue(chatId, out var oldHandler))
+                        {
+                            eventPublisher.RaiseMarketDataEvent -= oldHandler;
+                            handlerDictionary.Remove(chatId);
+                            toSend = $"Unsubscribed you. (Chat: {chatId})";
+                            replyMarkup =  new ReplyKeyboardMarkup(new KeyboardButton("Start"));
+                        }
+                        else
+                        {
+                            toSend = $"Couldn't unsubscribe you. You probably aren't subscribed. (Chat: {chatId})";
+                        }
+
                         break;
                     }
                 default:
@@ -97,7 +115,7 @@ namespace SlowMarketWatcher
 
 
             Console.WriteLine($"Received a message '{messageText} in chat '{chatId}'");
-            await botClient.SendTextMessageAsync(chatId: chatId, text: toSend, cancellationToken: cancellationToken);
+            await botClient.SendTextMessageAsync(chatId: chatId, text: toSend, replyMarkup: replyMarkup, cancellationToken: cancellationToken);
         }
 
         private Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
