@@ -13,7 +13,7 @@ namespace SlowMarketWatcher
     class SlowMarketWatcherBot
     {
         private TelegramBotClient botClient;
-        private ConcurrentBag<long> ids; // TODO: use hashmap from ids to delegate functions?
+        private ConcurrentBag<long> ids; // TODO: use hashmap from ids to delegate functions? i.e. to allow unsubscribe.
         private MarketData eventPublisher;
 
         public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher)

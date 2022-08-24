@@ -33,6 +33,7 @@ namespace SlowMarketWatcher
 
         private void OnTimedEvent(Object? source, ElapsedEventArgs e)
         {
+            // TODO: fetch and use actual data
             OnRaiseMarketDataEvent(new MarketDataEventArgs("Event triggered"));
         }
 
