@@ -10,8 +10,8 @@ namespace SlowMarketWatcher
         {
             DotEnv.Load();
 
-            var marketData = new MarketData(Environment.GetEnvironmentVariable("ALPHA_VANTAGE_API_KEY"));
-            var bot = new SlowMarketWatcherBot(Environment.GetEnvironmentVariable("TELEGRAM_ACCESS_TOKEN"), marketData);
+            var marketData = new MarketData(Environment.GetEnvironmentVariable("ALPHA_VANTAGE_API_KEY") ?? throw new ArgumentNullException());
+            var bot = new SlowMarketWatcherBot(Environment.GetEnvironmentVariable("TELEGRAM_ACCESS_TOKEN") ?? throw new ArgumentNullException(), marketData);
             await bot.StartAndRun();
         }
     }
