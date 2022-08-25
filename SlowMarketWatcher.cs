@@ -67,7 +67,7 @@ namespace SlowMarketWatcher
 
             var chatId = message.Chat.Id;
 
-            var replyMarkup = new ReplyKeyboardMarkup(new [] { new KeyboardButton("Start"), new KeyboardButton("Stop") }) { ResizeKeyboard = true };
+            var replyMarkup = new ReplyKeyboardMarkup(new[] { new KeyboardButton("Start"), new KeyboardButton("Stop") }) { ResizeKeyboard = true };
             string toSend;
             switch (messageText.ToLower())
             {
@@ -97,7 +97,7 @@ namespace SlowMarketWatcher
                             eventPublisher.RaiseMarketDataEvent -= oldHandler;
                             handlerDictionary.Remove(chatId);
                             toSend = $"Unsubscribed you. (Chat: {chatId})";
-                            replyMarkup =  new ReplyKeyboardMarkup(new KeyboardButton("Start"));
+                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Start"));
                         }
                         else
                         {

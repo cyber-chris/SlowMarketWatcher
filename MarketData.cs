@@ -9,10 +9,12 @@ namespace SlowMarketWatcher
     {
         public string Message { get; set; }
 
-        public MarketDataEventArgs(JObject timeSeriesDailyResponse) {
+        public MarketDataEventArgs(JObject timeSeriesDailyResponse)
+        {
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var timeSeriesDaily = timeSeriesDailyResponse["Time Series (Daily)"].ToObject<JObject>();
-            while (!timeSeriesDaily.ContainsKey(today.ToString("yyyy-MM-dd"))) {
+            while (!timeSeriesDaily.ContainsKey(today.ToString("yyyy-MM-dd")))
+            {
                 today = today.AddDays(-1);
             }
 
@@ -21,7 +23,7 @@ namespace SlowMarketWatcher
 
             var outputMessage = "";
             outputMessage += $"\n{symbol} close on {today}: {closeVal}";
-            outputMessage += $"\n14 day SMA: {SimpleMovingAverage(today, timeSeriesDaily)}";
+            outputMessage += $"\n14 period SMA: {SimpleMovingAverage(today, timeSeriesDaily)}";
             Message = outputMessage;
 
             // TODO:
@@ -35,21 +37,26 @@ namespace SlowMarketWatcher
 
         /// Returns value rounded to 2dp.
         private double SimpleMovingAverage(DateOnly mostRecentDataDate, in JObject timeSeriesDaily, int days = 14)
+        {
+            var closeSum = 0.0;
+            for (var i = 0; i <= days; i++)
             {
-                var closeSum = 0.0;
-                for (var i = 0; i <= days; i++) {
-                    closeSum += timeSeriesDaily[mostRecentDataDate.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+                closeSum += timeSeriesDaily[mostRecentDataDate.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+                do
+                {
                     mostRecentDataDate = mostRecentDataDate.AddDays(-1);
-                }
-                return Math.Round(closeSum / days, 2);
+                } while (!timeSeriesDaily.ContainsKey(mostRecentDataDate.ToString("yyyy-MM-dd")));
             }
-}
+            return Math.Round(closeSum / days, 2);
+        }
+    }
 
-    public class TimeSeriesDailyResponse {
+    public class TimeSeriesDailyResponse
+    {
         [JsonProperty("Meta Data")]
-        public IDictionary<string, string> MetaData { get; }
+        public IDictionary<string, string>? MetaData { get; }
         [JsonProperty("Time Series (Daily)")]
-        public IDictionary<string, IDictionary<string, string>> TimeSeriesDaily { get; }
+        public IDictionary<string, IDictionary<string, string>>? TimeSeriesDaily { get; }
     }
 
     public class MarketData
@@ -66,7 +73,7 @@ namespace SlowMarketWatcher
         public MarketData(string apiKey)
         {
             ApiKey = apiKey;
-            symbols = new [] { "VEA", "VOO" };
+            symbols = new[] { "VEA", "VOO" };
 
             var interval = 60000;
             aTimer = new System.Timers.Timer(interval);
@@ -77,7 +84,8 @@ namespace SlowMarketWatcher
 
         private void OnTimedEvent(Object? source, ElapsedEventArgs e)
         {
-            foreach (var symbol in symbols) {
+            foreach (var symbol in symbols)
+            {
                 var stringRes = httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ApiKey}").Result;
                 var response = JObject.Parse(stringRes);
 
