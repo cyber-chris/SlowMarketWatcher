@@ -75,11 +75,11 @@ namespace SlowMarketWatcher
             ApiKey = apiKey;
             symbols = new[] { "VEA", "VOO" };
 
-            #if (DEBUG)
+#if (DEBUG)
             var interval = 60000;
-            #else
+#else
             var interval = 60000 * 60 * 24;
-            #endif
+#endif
 
             aTimer = new System.Timers.Timer(interval);
             aTimer.Elapsed += OnTimedEvent;

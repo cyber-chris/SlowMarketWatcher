@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -17,11 +18,15 @@ namespace SlowMarketWatcher
         private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
         private MarketData eventPublisher;
 
+        /// used to wake up the main thread upon signal, for a graceful shutdown
+        private AutoResetEvent ctrlCEvent;
+
         public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher)
         {
             botClient = new TelegramBotClient(telegramAccessToken);
             handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             eventPublisher = publisher;
+            ctrlCEvent = new AutoResetEvent(false);
         }
 
         public async Task StartAndRun()
@@ -41,12 +46,19 @@ namespace SlowMarketWatcher
             );
 
             var me = await botClient.GetMeAsync();
-
-            // TODO: better method of start/stopping the bot
             Console.WriteLine($"Starting {me.Username}");
-            Console.ReadLine();
+
+            PosixSignalRegistration.Create(PosixSignal.SIGINT, SigintHandler);
+            ctrlCEvent.WaitOne();
 
             await Stop(botClient, cts);
+        }
+
+        private void SigintHandler(PosixSignalContext ctx)
+        {
+            // effectively, this is a hacky way to wake up the main thread upon SIGINT, avoiding a spin loop
+            ctx.Cancel = true;
+            ctrlCEvent.Set();
         }
 
         private async Task Stop(ITelegramBotClient bot, CancellationTokenSource cts)
