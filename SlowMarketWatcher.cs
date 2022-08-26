@@ -42,6 +42,7 @@ namespace SlowMarketWatcher
 
             var me = await botClient.GetMeAsync();
 
+            // TODO: better method of start/stopping the bot
             Console.WriteLine($"Starting {me.Username}");
             Console.ReadLine();
 
