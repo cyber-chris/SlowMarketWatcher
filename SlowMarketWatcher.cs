@@ -63,6 +63,7 @@ namespace SlowMarketWatcher
 
         private async Task Stop(ITelegramBotClient bot, CancellationTokenSource cts)
         {
+            // TODO: persist ids
             foreach (var id in handlerDictionary.Keys)
             {
                 await bot.SendTextMessageAsync(id, "Shutting down, you may need to reactivate me later.", replyMarkup: new ReplyKeyboardMarkup(new KeyboardButton("Start")));
@@ -92,7 +93,7 @@ namespace SlowMarketWatcher
                         }
                         else
                         {
-                            EventHandler<MarketDataEventArgs> newHandler = (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message);
+                            EventHandler<MarketDataEventArgs> newHandler = (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message, parseMode: ParseMode.Markdown);
                             if (!handlerDictionary.TryAdd(chatId, newHandler))
                             {
                                 throw new Exception("Should be able to add new handler.");

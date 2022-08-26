@@ -21,13 +21,12 @@ namespace SlowMarketWatcher
             var symbol = timeSeriesDailyResponse["Meta Data"]["2. Symbol"].ToString();
             var closeVal = timeSeriesDaily[today.ToString("yyyy-MM-dd")]["4. close"];
 
-            var outputMessage = "";
-            outputMessage += $"\n{symbol} close on {today}: {closeVal}";
-            outputMessage += $"\n14 period SMA: {SimpleMovingAverage(today, timeSeriesDaily)}";
+            var days = 14;
+            var outputMessage = $"*{symbol}*";
+            outputMessage += $"\nClose on {today}: {closeVal}";
+            outputMessage += $"\n{days} period SMA: {SimpleMovingAverage(today, timeSeriesDaily, days)}";
+            outputMessage += $"\n{days} period RSI: {RelativeStrengthIndex(today, timeSeriesDaily, days)}";
             Message = outputMessage;
-
-            // TODO:
-            // - RSI
         }
 
         public MarketDataEventArgs(string message)
@@ -35,19 +34,51 @@ namespace SlowMarketWatcher
             Message = message;
         }
 
+        /// Returns the most recent date before the current date where we have trading data.
+        private DateOnly PrevDate(DateOnly currentDate, in JObject timeSeriesDaily)
+            {
+                do {
+                    currentDate = currentDate.AddDays(-1);
+                } while (!timeSeriesDaily.ContainsKey(currentDate.ToString("yyyy-MM-dd")));
+                return currentDate;
+            }
+
         /// Returns value rounded to 2dp.
-        private double SimpleMovingAverage(DateOnly mostRecentDataDate, in JObject timeSeriesDaily, int days = 14)
+        private double SimpleMovingAverage(DateOnly mostRecentDataDate, in JObject timeSeriesDaily, int lookbackDays = 14)
         {
             var closeSum = 0.0;
-            for (var i = 0; i <= days; i++)
+            for (var i = 0; i <= lookbackDays; i++)
             {
                 closeSum += timeSeriesDaily[mostRecentDataDate.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
-                do
-                {
-                    mostRecentDataDate = mostRecentDataDate.AddDays(-1);
-                } while (!timeSeriesDaily.ContainsKey(mostRecentDataDate.ToString("yyyy-MM-dd")));
+                mostRecentDataDate = PrevDate(mostRecentDataDate, timeSeriesDaily);
             }
-            return Math.Round(closeSum / days, 2);
+            return Math.Round(closeSum / lookbackDays, 2);
+        }
+
+        private double RelativeStrengthIndex(DateOnly mostRecentDataDate, in JObject timeSeriesDaily, int lookbackDays = 14)
+        {
+            var upwardSum = 0.0;
+            var downwardSum = 0.0;
+            for (var i = 0; i <= lookbackDays; i++) {
+                var prev = PrevDate(mostRecentDataDate, timeSeriesDaily);
+                var prevClose = timeSeriesDaily[prev.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+                var currClose = timeSeriesDaily[mostRecentDataDate.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+                if (prevClose <= currClose)
+                {
+                    upwardSum += currClose - prevClose;
+                } else {
+                    downwardSum += prevClose - currClose;
+                }
+
+                mostRecentDataDate = prev;
+            }
+            var averageGain = upwardSum / lookbackDays;
+            var averageLoss = downwardSum / lookbackDays;
+            if (averageLoss == 0) {
+                return 100.0; // because the relative strength will approach 0 so RSI will approach 100
+            }
+            var relativeStrength = averageGain/averageLoss;
+            return Math.Round(100 - (100 / (1 + relativeStrength)), 2) ;
         }
     }
 
