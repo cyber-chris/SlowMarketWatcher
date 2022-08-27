@@ -21,12 +21,22 @@ namespace SlowMarketWatcher
         /// used to wake up the main thread upon signal, for a graceful shutdown
         private AutoResetEvent ctrlCEvent;
 
-        public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher)
+        public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher, IEnumerable<long> initialIds)
         {
             botClient = new TelegramBotClient(telegramAccessToken);
-            handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             eventPublisher = publisher;
             ctrlCEvent = new AutoResetEvent(false);
+            handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
+            foreach (var id in initialIds)
+            {
+                EventHandler<MarketDataEventArgs> handler =
+                    (sender, e) => botClient.SendTextMessageAsync(id, e.Message, parseMode: ParseMode.Markdown);
+                var success = handlerDictionary.TryAdd(id, handler);
+                if (!success)
+                {
+                    throw new Exception("Could not add id to dictionary.");
+                }
+            }
         }
 
         public async Task StartAndRun()
@@ -37,7 +47,6 @@ namespace SlowMarketWatcher
             {
                 AllowedUpdates = Array.Empty<UpdateType>()
             };
-
             botClient.StartReceiving( // note that this does not block
                 updateHandler: this.HandleUpdateAsync,
                 pollingErrorHandler: this.HandlePollingErrorAsync,
@@ -47,6 +56,10 @@ namespace SlowMarketWatcher
 
             var me = await botClient.GetMeAsync();
             Console.WriteLine($"Starting {me.Username}");
+
+            await Parallel.ForEachAsync(handlerDictionary.Keys,
+                                        async (id, ct) => await botClient.SendTextMessageAsync(id, $"{me.Username} is active again!",
+                                                                                               cancellationToken: ct));
 
             PosixSignalRegistration.Create(PosixSignal.SIGINT, SigintHandler);
             ctrlCEvent.WaitOne();
@@ -63,10 +76,14 @@ namespace SlowMarketWatcher
 
         private async Task Stop(ITelegramBotClient bot, CancellationTokenSource cts)
         {
-            // TODO: persist ids
+            // TODO: logging, e.g. log here that we're persisting x ids.
+            if (System.IO.Directory.Exists("/data"))
+            {
+                await System.IO.File.WriteAllLinesAsync("/data/clientIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken: cts.Token);
+            }
             foreach (var id in handlerDictionary.Keys)
             {
-                await bot.SendTextMessageAsync(id, "Shutting down, you may need to reactivate me later.", replyMarkup: new ReplyKeyboardMarkup(new KeyboardButton("Start")));
+                await bot.SendTextMessageAsync(id, "Bot is shutting down temporarily.", cancellationToken: cts.Token);
             }
 
             cts.Cancel();
@@ -93,7 +110,8 @@ namespace SlowMarketWatcher
                         }
                         else
                         {
-                            EventHandler<MarketDataEventArgs> newHandler = (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message, parseMode: ParseMode.Markdown);
+                            EventHandler<MarketDataEventArgs> newHandler =
+                                (sender, e) => botClient.SendTextMessageAsync(chatId, e.Message, parseMode: ParseMode.Markdown);
                             if (!handlerDictionary.TryAdd(chatId, newHandler))
                             {
                                 throw new Exception("Should be able to add new handler.");
