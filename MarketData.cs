@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Timers;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -87,27 +88,29 @@ namespace SlowMarketWatcher
         }
     }
 
-    public class TimeSeriesDailyResponse
-    {
+    /// Model for the JSON response.
+    public record TimeSeriesDailyResponse(
         [JsonProperty("Meta Data")]
-        public IDictionary<string, string>? MetaData { get; }
+        IDictionary<string, string> MetaData,
         [JsonProperty("Time Series (Daily)")]
-        public IDictionary<string, IDictionary<string, string>>? TimeSeriesDaily { get; }
-    }
+        IDictionary<string, IDictionary<string, string>> TimeSeriesDaily
+    );
 
     public class MarketData
     {
-        private static readonly HttpClient httpClient = new HttpClient();
-        private System.Timers.Timer aTimer;
+        private readonly ILogger<MarketData> _logger;
+        private readonly HttpClient _httpClient;
+        private System.Timers.Timer aTimer; // TODO: it would be more sensible to have a fixed time per day
 
         private string ApiKey;
         private string[] symbols;
 
         public event EventHandler<MarketDataEventArgs>? RaiseMarketDataEvent;
 
-
-        public MarketData(string apiKey)
+        public MarketData(ILogger<MarketData> logger, HttpClient httpClient, string apiKey)
         {
+            _logger = logger;
+            _httpClient = httpClient;
             ApiKey = apiKey;
             symbols = new[] { "VEA", "VOO" };
 
@@ -127,7 +130,7 @@ namespace SlowMarketWatcher
         {
             foreach (var symbol in symbols)
             {
-                var stringRes = httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ApiKey}").Result;
+                var stringRes = _httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ApiKey}").Result;
                 var response = JObject.Parse(stringRes);
 
                 OnRaiseMarketDataEvent(new MarketDataEventArgs(response));

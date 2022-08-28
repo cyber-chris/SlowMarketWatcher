@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -12,20 +13,19 @@ namespace SlowMarketWatcher
     /// Starts the Telegram client to listen for messages.
     /// When a message from a new chat ID is received, subscribe to the market data events and send a new message after receiving
     /// new market data.
-    class SlowMarketWatcherBot
+    class SlowMarketWatcherBot : BackgroundService
     {
+        private readonly ILogger<SlowMarketWatcherBot> _logger;
+
         private ITelegramBotClient botClient;
         private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
         private MarketData eventPublisher;
 
-        /// used to wake up the main thread upon signal, for a graceful shutdown
-        private AutoResetEvent ctrlCEvent;
-
-        public SlowMarketWatcherBot(string telegramAccessToken, MarketData publisher, IEnumerable<long> initialIds)
+        public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketData publisher, string telegramAccessToken, IEnumerable<long> initialIds)
         {
+            _logger = logger;
             botClient = new TelegramBotClient(telegramAccessToken);
             eventPublisher = publisher;
-            ctrlCEvent = new AutoResetEvent(false);
             handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             foreach (var id in initialIds)
             {
@@ -39,10 +39,7 @@ namespace SlowMarketWatcher
             }
         }
 
-        public async Task StartAndRun()
-        {
-            using var cts = new CancellationTokenSource();
-
+        protected override async Task ExecuteAsync(CancellationToken token) {
             var receiverOptions = new ReceiverOptions
             {
                 AllowedUpdates = Array.Empty<UpdateType>()
@@ -51,42 +48,32 @@ namespace SlowMarketWatcher
                 updateHandler: this.HandleUpdateAsync,
                 pollingErrorHandler: this.HandlePollingErrorAsync,
                 receiverOptions: receiverOptions,
-                cancellationToken: cts.Token
+                cancellationToken: token
             );
 
             var me = await botClient.GetMeAsync();
-            Console.WriteLine($"Starting {me.Username}");
+            _logger.LogInformation($"Started {me.Username}");
 
             await Parallel.ForEachAsync(handlerDictionary.Keys,
                                         async (id, ct) => await botClient.SendTextMessageAsync(id, $"{me.Username} is active again!",
                                                                                                cancellationToken: ct));
 
-            PosixSignalRegistration.Create(PosixSignal.SIGINT, SigintHandler);
-            ctrlCEvent.WaitOne();
-
-            await Stop(botClient, cts);
+            WaitHandle.WaitAny(new []{ token.WaitHandle });
         }
 
-        private void SigintHandler(PosixSignalContext ctx)
-        {
-            // effectively, this is a hacky way to wake up the main thread upon SIGINT, avoiding a spin loop
-            ctx.Cancel = true;
-            ctrlCEvent.Set();
-        }
-
-        private async Task Stop(ITelegramBotClient bot, CancellationTokenSource cts)
-        {
-            // TODO: logging, e.g. log here that we're persisting x ids.
+        public override async Task StopAsync(CancellationToken cancellationToken) {
             if (System.IO.Directory.Exists("/data"))
             {
-                await System.IO.File.WriteAllLinesAsync("/data/clientIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken: cts.Token);
-            }
-            foreach (var id in handlerDictionary.Keys)
-            {
-                await bot.SendTextMessageAsync(id, "Bot is shutting down temporarily.", cancellationToken: cts.Token);
+                await System.IO.File.WriteAllLinesAsync("/data/clientIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken);
+                _logger.LogInformation("Persisted {} ids.", handlerDictionary.Keys.Count);
             }
 
-            cts.Cancel();
+            foreach (var id in handlerDictionary.Keys)
+            {
+                await botClient.SendTextMessageAsync(id, "Bot is shutting down temporarily.", cancellationToken: cancellationToken);
+            }
+
+            await base.StopAsync(cancellationToken);
         }
 
         private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
@@ -146,7 +133,7 @@ namespace SlowMarketWatcher
             }
 
 
-            Console.WriteLine($"Received a message '{messageText} in chat '{chatId}'");
+            _logger.LogInformation($"Received a message '{messageText} in chat '{chatId}'");
             await botClient.SendTextMessageAsync(chatId: chatId, text: toSend, replyMarkup: replyMarkup, cancellationToken: cancellationToken);
         }
 
@@ -158,7 +145,7 @@ namespace SlowMarketWatcher
                 _ => exception.ToString()
             };
 
-            Console.WriteLine(ErrorMessage);
+            _logger.LogWarning(ErrorMessage);
             return Task.CompletedTask;
         }
     }
