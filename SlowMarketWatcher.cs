@@ -29,7 +29,6 @@ namespace SlowMarketWatcher
             handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             foreach (var id in initialIds)
             {
-                // TODO: debug this loading, it does not work
                 EventHandler<MarketDataEventArgs> handler =
                     (sender, e) => botClient.SendTextMessageAsync(id, e.Message, parseMode: ParseMode.Markdown);
                 var success = handlerDictionary.TryAdd(id, handler);
@@ -37,6 +36,7 @@ namespace SlowMarketWatcher
                 {
                     throw new Exception("Could not add id to dictionary.");
                 }
+                _marketDataEvent.RaiseMarketDataEvent += handler;
             }
         }
 
