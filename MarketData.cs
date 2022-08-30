@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Timers;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Quartz;
 
 namespace SlowMarketWatcher
 {
@@ -96,34 +98,68 @@ namespace SlowMarketWatcher
         IDictionary<string, IDictionary<string, string>> TimeSeriesDaily
     );
 
-    public class MarketData
+    public class MarketDataEvent
+    {
+        public event EventHandler<MarketDataEventArgs>? RaiseMarketDataEvent;
+
+        public void OnRaiseMarketDataEvent(MarketDataEventArgs e)
+        {
+            // Since the event is null if no subscribers, copy the event and then check,
+            // to avoid the race condition of someone unsubscribing after null check.
+            var raiseEvent = RaiseMarketDataEvent;
+            if (raiseEvent != null)
+            {
+                raiseEvent(this, e);
+            }
+        }
+    }
+
+    public class MarketData : BackgroundService
     {
         private readonly ILogger<MarketData> _logger;
         private readonly HttpClient _httpClient;
-        private System.Timers.Timer aTimer; // TODO: it would be more sensible to have a fixed time per day
+        private readonly ISchedulerFactory _schedulerFactory;
+        private readonly MarketDataEvent _marketDataEvent;
 
         private string ApiKey;
         private string[] symbols;
 
-        public event EventHandler<MarketDataEventArgs>? RaiseMarketDataEvent;
-
-        public MarketData(ILogger<MarketData> logger, HttpClient httpClient, string apiKey)
+        public MarketData(ILogger<MarketData> logger, HttpClient httpClient, ISchedulerFactory schedulerFactory, MarketDataEvent marketDataEvent, string apiKey)
         {
             _logger = logger;
             _httpClient = httpClient;
+            _schedulerFactory = schedulerFactory;
+            _marketDataEvent = marketDataEvent;
             ApiKey = apiKey;
             symbols = new[] { "VEA", "VOO" };
+        }
 
+        protected override async Task ExecuteAsync(CancellationToken token)
+        {
 #if (DEBUG)
-            var interval = 60000;
+            var cronExpr = "0 * * * * ?"; // every minute
 #else
-            var interval = 60000 * 60 * 24;
+            var cronExpr = "0 0 9 * * ?"; // every 9:00
 #endif
 
-            aTimer = new System.Timers.Timer(interval);
-            aTimer.Elapsed += OnTimedEvent;
-            aTimer.AutoReset = true;
-            aTimer.Enabled = true;
+            var scheduler = await _schedulerFactory.GetScheduler();
+            await scheduler.Start();
+
+            var job = JobBuilder
+                .Create<MarketDataJob>()
+                .Build();
+            // TODO: use Quartz DI
+            job.JobDataMap.Put("httpClient", _httpClient);
+            job.JobDataMap.Put("marketDataEvent", _marketDataEvent);
+            job.JobDataMap.Put("symbols", symbols);
+            job.JobDataMap.Put("apiKey", ApiKey);
+
+            var trigger = TriggerBuilder.Create()
+                .StartNow()
+                .WithCronSchedule(cronExpr, x => x.InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("GMT Standard Time")))
+                .Build();
+
+            await scheduler.ScheduleJob(job, trigger);
         }
 
         private void OnTimedEvent(Object? source, ElapsedEventArgs e)
@@ -133,19 +169,28 @@ namespace SlowMarketWatcher
                 var stringRes = _httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ApiKey}").Result;
                 var response = JObject.Parse(stringRes);
 
-                OnRaiseMarketDataEvent(new MarketDataEventArgs(response));
+                _marketDataEvent.OnRaiseMarketDataEvent(new MarketDataEventArgs(response));
             }
         }
+    }
 
-        protected virtual void OnRaiseMarketDataEvent(MarketDataEventArgs e)
+    public class MarketDataJob : IJob
+    {
+        public async Task Execute(IJobExecutionContext executionContext)
         {
-            // Since the event is null if no subscribers, copy the event and then check,
-            // to avoid the race condition of someone unsubscribing after null check.
-            var raiseEvent = RaiseMarketDataEvent;
-            if (raiseEvent != null)
+            var httpClient = (HttpClient)executionContext.MergedJobDataMap.Get("httpClient");
+            var marketDataEvent = (MarketDataEvent)executionContext.MergedJobDataMap.Get("marketDataEvent");
+            var symbols = (string[])executionContext.MergedJobDataMap.Get("symbols");
+            var apiKey = executionContext.MergedJobDataMap.Get("apiKey");
+
+            foreach (var symbol in symbols)
             {
-                raiseEvent(this, e);
+                var stringRes = await httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={apiKey}");
+                var response = JObject.Parse(stringRes);
+
+                marketDataEvent.OnRaiseMarketDataEvent(new MarketDataEventArgs(response));
             }
+
         }
     }
 }

@@ -3,6 +3,8 @@ using dotenv.net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Quartz;
+using Quartz.Impl;
 
 namespace SlowMarketWatcher
 {
@@ -19,22 +21,27 @@ namespace SlowMarketWatcher
             var host = Host.CreateDefaultBuilder(args)
                 .ConfigureServices(services =>
                 {
+                    services.AddSingleton<MarketDataEvent>();
+                    services.AddHttpClient<MarketData>();
+                    services.AddHostedService<MarketData>(
+                        provider => new MarketData(
+                            provider.GetService<ILogger<MarketData>>() ?? throw new ArgumentNullException(nameof(ILogger)),
+                            provider.GetService<HttpClient>() ?? throw new ArgumentNullException(nameof(HttpClient)),
+                            provider.GetService<ISchedulerFactory>() ?? throw new ArgumentNullException(nameof(ISchedulerFactory)),
+                            provider.GetService<MarketDataEvent>() ?? throw new ArgumentNullException(nameof(MarketDataEvent)),
+                            // TODO: look into IOptions for better DI
+                            Environment.GetEnvironmentVariable("ALPHA_VANTAGE_API_KEY") ?? throw new ArgumentNullException("API Key")
+                        )
+                    );
                     services.AddHostedService<SlowMarketWatcherBot>(
                             provider => new SlowMarketWatcherBot(
-                                provider.GetService<ILogger<SlowMarketWatcherBot>>() ?? throw new ArgumentNullException(),
-                                provider.GetService<MarketData>() ?? throw new ArgumentNullException(),
-                                Environment.GetEnvironmentVariable("TELEGRAM_ACCESS_TOKEN") ?? throw new ArgumentNullException(),
+                                provider.GetService<ILogger<SlowMarketWatcherBot>>() ?? throw new ArgumentNullException(nameof(ILogger)),
+                                provider.GetService<MarketDataEvent>() ?? throw new ArgumentNullException(nameof(MarketDataEvent)),
+                                Environment.GetEnvironmentVariable("TELEGRAM_ACCESS_TOKEN") ?? throw new ArgumentNullException("Access Token"),
                                 storedIds
                             )
                         );
-                    services.AddHttpClient<MarketData>();
-                    services.AddSingleton<MarketData>(
-                        provider => new MarketData(
-                            provider.GetService<ILogger<MarketData>>() ?? throw new ArgumentNullException(),
-                            provider.GetService<HttpClient>() ?? throw new ArgumentNullException(),
-                            Environment.GetEnvironmentVariable("ALPHA_VANTAGE_API_KEY") ?? throw new ArgumentNullException()
-                        )
-                    );
+                    services.AddSingleton<ISchedulerFactory, StdSchedulerFactory>();
                 })
                 .Build();
 

@@ -16,19 +16,20 @@ namespace SlowMarketWatcher
     class SlowMarketWatcherBot : BackgroundService
     {
         private readonly ILogger<SlowMarketWatcherBot> _logger;
+        private readonly MarketDataEvent _marketDataEvent;
 
         private ITelegramBotClient botClient;
         private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
-        private MarketData eventPublisher;
 
-        public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketData publisher, string telegramAccessToken, IEnumerable<long> initialIds)
+        public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketDataEvent marketDataEvent, string telegramAccessToken, IEnumerable<long> initialIds)
         {
             _logger = logger;
             botClient = new TelegramBotClient(telegramAccessToken);
-            eventPublisher = publisher;
+            _marketDataEvent = marketDataEvent;
             handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
             foreach (var id in initialIds)
             {
+                // TODO: debug this loading, it does not work
                 EventHandler<MarketDataEventArgs> handler =
                     (sender, e) => botClient.SendTextMessageAsync(id, e.Message, parseMode: ParseMode.Markdown);
                 var success = handlerDictionary.TryAdd(id, handler);
@@ -39,7 +40,8 @@ namespace SlowMarketWatcher
             }
         }
 
-        protected override async Task ExecuteAsync(CancellationToken token) {
+        protected override async Task ExecuteAsync(CancellationToken token)
+        {
             var receiverOptions = new ReceiverOptions
             {
                 AllowedUpdates = Array.Empty<UpdateType>()
@@ -58,10 +60,11 @@ namespace SlowMarketWatcher
                                         async (id, ct) => await botClient.SendTextMessageAsync(id, $"{me.Username} is active again!",
                                                                                                cancellationToken: ct));
 
-            WaitHandle.WaitAny(new []{ token.WaitHandle });
+            WaitHandle.WaitAny(new[] { token.WaitHandle });
         }
 
-        public override async Task StopAsync(CancellationToken cancellationToken) {
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
             if (System.IO.Directory.Exists("/data"))
             {
                 await System.IO.File.WriteAllLinesAsync("/data/clientIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken);
@@ -103,7 +106,7 @@ namespace SlowMarketWatcher
                             {
                                 throw new Exception("Should be able to add new handler.");
                             }
-                            eventPublisher.RaiseMarketDataEvent += newHandler;
+                            _marketDataEvent.RaiseMarketDataEvent += newHandler;
                             toSend = $"Subscribing... (Chat: {chatId})";
                             replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Stop"));
                         }
@@ -113,7 +116,7 @@ namespace SlowMarketWatcher
                     {
                         if (handlerDictionary.TryGetValue(chatId, out var oldHandler))
                         {
-                            eventPublisher.RaiseMarketDataEvent -= oldHandler;
+                            _marketDataEvent.RaiseMarketDataEvent -= oldHandler;
                             handlerDictionary.Remove(chatId);
                             toSend = $"Unsubscribed you. (Chat: {chatId})";
                             replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Start"));
