@@ -2,7 +2,6 @@
 using dotenv.net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Quartz;
 using Quartz.Impl;
 
@@ -15,51 +14,26 @@ namespace SlowMarketWatcher
         {
             DotEnv.Load();
 
-            var storedIds = GetStoredIds();
-            Console.WriteLine($"Found {storedIds.Count} stored ids.");
-
             var host = Host.CreateDefaultBuilder(args)
-                .ConfigureServices(services =>
+                .ConfigureServices((ctx, services) =>
                 {
+                    var configurationRoot = ctx.Configuration;
+                    services.Configure<AlphaVantageSecret>(
+                        configurationRoot.GetSection(nameof(AlphaVantageSecret))
+                    );
+                    services.Configure<TelegramSecret>(
+                        configurationRoot.GetSection(nameof(TelegramSecret))
+                    );
+
                     services.AddSingleton<MarketDataEvent>();
                     services.AddHttpClient<MarketData>();
-                    services.AddHostedService<MarketData>(
-                        provider => new MarketData(
-                            provider.GetService<ILogger<MarketData>>() ?? throw new ArgumentNullException(nameof(ILogger)),
-                            provider.GetService<HttpClient>() ?? throw new ArgumentNullException(nameof(HttpClient)),
-                            provider.GetService<ISchedulerFactory>() ?? throw new ArgumentNullException(nameof(ISchedulerFactory)),
-                            provider.GetService<MarketDataEvent>() ?? throw new ArgumentNullException(nameof(MarketDataEvent)),
-                            // TODO: look into IOptions for better DI
-                            Environment.GetEnvironmentVariable("ALPHA_VANTAGE_API_KEY") ?? throw new ArgumentNullException("API Key")
-                        )
-                    );
-                    services.AddHostedService<SlowMarketWatcherBot>(
-                            provider => new SlowMarketWatcherBot(
-                                provider.GetService<ILogger<SlowMarketWatcherBot>>() ?? throw new ArgumentNullException(nameof(ILogger)),
-                                provider.GetService<MarketDataEvent>() ?? throw new ArgumentNullException(nameof(MarketDataEvent)),
-                                Environment.GetEnvironmentVariable("TELEGRAM_ACCESS_TOKEN") ?? throw new ArgumentNullException("Access Token"),
-                                storedIds
-                            )
-                        );
+                    services.AddHostedService<MarketData>();
+                    services.AddHostedService<SlowMarketWatcherBot>();
                     services.AddSingleton<ISchedulerFactory, StdSchedulerFactory>();
                 })
                 .Build();
 
             await host.RunAsync();
-        }
-
-        static IList<long> GetStoredIds()
-        {
-            var path = "/data/chatIds";
-            var ids = new List<long>();
-            if (System.IO.File.Exists(path))
-            {
-                foreach (var line in System.IO.File.ReadLines(path))
-                {
-                    ids.Add(long.Parse(line));
-                }
-            }
-            return ids;
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Telegram.Bot;
 using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
@@ -13,7 +14,7 @@ namespace SlowMarketWatcher
     /// Starts the Telegram client to listen for messages.
     /// When a message from a new chat ID is received, subscribe to the market data events and send a new message after receiving
     /// new market data.
-    class SlowMarketWatcherBot : BackgroundService
+    public class SlowMarketWatcherBot : BackgroundService
     {
         private readonly ILogger<SlowMarketWatcherBot> _logger;
         private readonly MarketDataEvent _marketDataEvent;
@@ -23,13 +24,30 @@ namespace SlowMarketWatcher
         /// Dictionary mapping chatIds to handler functions.
         private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
 
-        public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketDataEvent marketDataEvent, string telegramAccessToken, IEnumerable<long> initialIds)
+        private IList<long> GetStoredIds()
+        {
+            var path = "/data/chatIds";
+            var ids = new List<long>();
+            if (System.IO.File.Exists(path))
+            {
+                foreach (var line in System.IO.File.ReadLines(path))
+                {
+                    ids.Add(long.Parse(line));
+                }
+            }
+            return ids;
+        }
+
+        public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketDataEvent marketDataEvent, IOptions<TelegramSecret> telegramSecret)
         {
             _logger = logger;
-            botClient = new TelegramBotClient(telegramAccessToken);
+            botClient = new TelegramBotClient(telegramSecret.Value.AccessToken ?? throw new ArgumentNullException());
             _marketDataEvent = marketDataEvent;
             handlerDictionary = new ConcurrentDictionary<long, EventHandler<MarketDataEventArgs>>();
-            foreach (var id in initialIds)
+
+            var storedIds = GetStoredIds();
+            _logger.LogInformation($"Found {storedIds.Count} stored chat ids.");
+            foreach (var id in storedIds)
             {
                 EventHandler<MarketDataEventArgs> handler =
                     (sender, e) => botClient.SendTextMessageAsync(id, e.Message, parseMode: ParseMode.Markdown);
@@ -153,5 +171,10 @@ namespace SlowMarketWatcher
             _logger.LogWarning(ErrorMessage);
             return Task.CompletedTask;
         }
+    }
+
+    public record TelegramSecret
+    {
+        public string? AccessToken { get; set; }
     }
 }

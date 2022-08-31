@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Timers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Quartz;
@@ -21,6 +22,7 @@ namespace SlowMarketWatcher
                 today = today.AddDays(-1);
             }
 
+            // TODO: fetch metadata on symbol
             var symbol = timeSeriesDailyResponse["Meta Data"]["2. Symbol"].ToString();
             var closeVal = timeSeriesDaily[today.ToString("yyyy-MM-dd")]["4. close"];
 
@@ -114,6 +116,11 @@ namespace SlowMarketWatcher
         }
     }
 
+    public class AlphaVantageSecret
+    {
+        public string? ApiKey { get; set; }
+    }
+
     public class MarketData : BackgroundService
     {
         private readonly ILogger<MarketData> _logger;
@@ -124,13 +131,13 @@ namespace SlowMarketWatcher
         private string ApiKey;
         private string[] symbols;
 
-        public MarketData(ILogger<MarketData> logger, HttpClient httpClient, ISchedulerFactory schedulerFactory, MarketDataEvent marketDataEvent, string apiKey)
+        public MarketData(ILogger<MarketData> logger, HttpClient httpClient, ISchedulerFactory schedulerFactory, MarketDataEvent marketDataEvent, IOptions<AlphaVantageSecret> alphaVantageSecret)
         {
             _logger = logger;
             _httpClient = httpClient;
             _schedulerFactory = schedulerFactory;
             _marketDataEvent = marketDataEvent;
-            ApiKey = apiKey;
+            ApiKey = alphaVantageSecret.Value.ApiKey ?? throw new ArgumentNullException();
             symbols = new[] { "VEA", "VOO" };
         }
 
