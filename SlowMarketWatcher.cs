@@ -19,6 +19,8 @@ namespace SlowMarketWatcher
         private readonly MarketDataEvent _marketDataEvent;
 
         private ITelegramBotClient botClient;
+
+        /// Dictionary mapping chatIds to handler functions.
         private IDictionary<long, EventHandler<MarketDataEventArgs>> handlerDictionary;
 
         public SlowMarketWatcherBot(ILogger<SlowMarketWatcherBot> logger, MarketDataEvent marketDataEvent, string telegramAccessToken, IEnumerable<long> initialIds)
@@ -67,7 +69,7 @@ namespace SlowMarketWatcher
         {
             if (System.IO.Directory.Exists("/data"))
             {
-                await System.IO.File.WriteAllLinesAsync("/data/clientIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken);
+                await System.IO.File.WriteAllLinesAsync("/data/chatIds", handlerDictionary.Keys.Select(id => id.ToString()), cancellationToken);
                 _logger.LogInformation("Persisted {} ids.", handlerDictionary.Keys.Count);
             }
 

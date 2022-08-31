@@ -50,7 +50,7 @@ namespace SlowMarketWatcher
 
         static IList<long> GetStoredIds()
         {
-            var path = "/data/clientIds";
+            var path = "/data/chatIds";
             var ids = new List<long>();
             if (System.IO.File.Exists(path))
             {
