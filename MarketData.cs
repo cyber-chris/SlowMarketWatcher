@@ -1,9 +1,6 @@
-using System.Text.Json;
-using System.Timers;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Quartz;
 
@@ -13,7 +10,7 @@ namespace SlowMarketWatcher
     {
         public string Message { get; set; }
 
-        public MarketDataEventArgs(JObject timeSeriesDailyResponse)
+        public MarketDataEventArgs(JObject metadataResponse, JObject timeSeriesDailyResponse)
         {
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             var timeSeriesDaily = timeSeriesDailyResponse["Time Series (Daily)"].ToObject<JObject>();
@@ -22,21 +19,29 @@ namespace SlowMarketWatcher
                 today = today.AddDays(-1);
             }
 
-            // TODO: fetch metadata on symbol
             var symbol = timeSeriesDailyResponse["Meta Data"]["2. Symbol"].ToString();
             var closeVal = timeSeriesDaily[today.ToString("yyyy-MM-dd")]["4. close"];
 
+            var name = GetName(symbol, metadataResponse);
+
             var days = 14;
-            var outputMessage = $"*{symbol}*";
+            var outputMessage = $"*{name} ({symbol})*";
             outputMessage += $"\nClose on {today}: {closeVal}";
             outputMessage += $"\n{days} period SMA: {SimpleMovingAverage(today, timeSeriesDaily, days)}";
             outputMessage += $"\n{days} period RSI: {RelativeStrengthIndex(today, timeSeriesDaily, days)}";
+            // TODO: LSTM's prediction?
             Message = outputMessage;
         }
 
         public MarketDataEventArgs(string message)
         {
             Message = message;
+        }
+
+        private string GetName(string symbol, JObject metadataResponse)
+        {
+            var metadata = metadataResponse["bestMatches"][0];
+            return metadata["2. name"].ToString();
         }
 
         /// Returns the most recent date before the current date where we have trading data.
@@ -91,14 +96,6 @@ namespace SlowMarketWatcher
             return Math.Round(100 - (100 / (1 + relativeStrength)), 2);
         }
     }
-
-    /// Model for the JSON response.
-    public record TimeSeriesDailyResponse(
-        [JsonProperty("Meta Data")]
-        IDictionary<string, string> MetaData,
-        [JsonProperty("Time Series (Daily)")]
-        IDictionary<string, IDictionary<string, string>> TimeSeriesDaily
-    );
 
     public class MarketDataEvent
     {
@@ -168,21 +165,12 @@ namespace SlowMarketWatcher
 
             await scheduler.ScheduleJob(job, trigger);
         }
-
-        private void OnTimedEvent(Object? source, ElapsedEventArgs e)
-        {
-            foreach (var symbol in symbols)
-            {
-                var stringRes = _httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={ApiKey}").Result;
-                var response = JObject.Parse(stringRes);
-
-                _marketDataEvent.OnRaiseMarketDataEvent(new MarketDataEventArgs(response));
-            }
-        }
     }
 
     public class MarketDataJob : IJob
     {
+        private const string BaseURL = "https://www.alphavantage.co/query";
+
         public async Task Execute(IJobExecutionContext executionContext)
         {
             var httpClient = (HttpClient)executionContext.MergedJobDataMap.Get("httpClient");
@@ -192,10 +180,14 @@ namespace SlowMarketWatcher
 
             foreach (var symbol in symbols)
             {
-                var stringRes = await httpClient.GetStringAsync($"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={apiKey}");
-                var response = JObject.Parse(stringRes);
+                // probably should define classes here instead
+                var metadataString = await httpClient.GetStringAsync($"{BaseURL}?function=SYMBOL_SEARCH&keywords={symbol}&apikey={apiKey}");
+                var metadataResponse = JObject.Parse(metadataString);
 
-                marketDataEvent.OnRaiseMarketDataEvent(new MarketDataEventArgs(response));
+                var timeSeriesStringRes = await httpClient.GetStringAsync($"{BaseURL}?function=TIME_SERIES_DAILY&symbol={symbol}&outputsize=full&apikey={apiKey}");
+                var timeSeriesResponse = JObject.Parse(timeSeriesStringRes);
+
+                marketDataEvent.OnRaiseMarketDataEvent(new MarketDataEventArgs(metadataResponse, timeSeriesResponse));
             }
 
         }
