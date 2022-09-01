@@ -20,16 +20,26 @@ namespace SlowMarketWatcher
             }
 
             var symbol = timeSeriesDailyResponse["Meta Data"]["2. Symbol"].ToString();
-            var closeVal = timeSeriesDaily[today.ToString("yyyy-MM-dd")]["4. close"];
+            var (closeVal, percentDiff) = GetCloseAndDiff(symbol, today, timeSeriesDaily);
 
             var name = GetName(symbol, metadataResponse);
 
-            var days = 14;
             var outputMessage = $"*{name} ({symbol})*";
-            outputMessage += $"\nClose on {today}: {closeVal}";
+            outputMessage += $"\nClose on {today}: {closeVal} ({percentDiff}%)";
+
+            var days = 14;
             outputMessage += $"\n{days} period SMA: {SimpleMovingAverage(today, timeSeriesDaily, days)}";
-            outputMessage += $"\n{days} period RSI: {RelativeStrengthIndex(today, timeSeriesDaily, days)}";
+
+            var rsi = RelativeStrengthIndex(today, timeSeriesDaily, days);
+            var rsiHelp = rsi switch {
+                < 30.0 => " (_Oversold_)",
+                > 70.0 => " (_Overbought_)",
+                _ => ""
+            };
+            outputMessage += $"\n{days} period RSI: {rsi}{rsiHelp}";
+
             // TODO: LSTM's prediction?
+
             Message = outputMessage;
         }
 
@@ -42,6 +52,13 @@ namespace SlowMarketWatcher
         {
             var metadata = metadataResponse["bestMatches"][0];
             return metadata["2. name"].ToString();
+        }
+
+        private (double, double) GetCloseAndDiff(string symbol, DateOnly today, JObject timeSeriesDaily) {
+            double closeVal = timeSeriesDaily[today.ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+            double prevCloseVal = timeSeriesDaily[PrevDate(today, timeSeriesDaily).ToString("yyyy-MM-dd")]["4. close"].ToObject<double>();
+            var diff = closeVal - prevCloseVal;
+            return (closeVal, Math.Round(diff*100/prevCloseVal, 2));
         }
 
         /// Returns the most recent date before the current date where we have trading data.
@@ -68,6 +85,7 @@ namespace SlowMarketWatcher
 
         private double RelativeStrengthIndex(DateOnly mostRecentDataDate, in JObject timeSeriesDaily, int lookbackDays = 14)
         {
+            // TODO: fix RSI, ensure correct moving average is used
             var upwardSum = 0.0;
             var downwardSum = 0.0;
             for (var i = 0; i <= lookbackDays; i++)

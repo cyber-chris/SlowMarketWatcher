@@ -128,7 +128,7 @@ namespace SlowMarketWatcher
                             }
                             _marketDataEvent.RaiseMarketDataEvent += newHandler;
                             toSend = $"Subscribing... (Chat: {chatId})";
-                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Stop"));
+                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Stop")) { ResizeKeyboard = true };
                         }
                         break;
                     }
@@ -139,7 +139,7 @@ namespace SlowMarketWatcher
                             _marketDataEvent.RaiseMarketDataEvent -= oldHandler;
                             handlerDictionary.Remove(chatId);
                             toSend = $"Unsubscribed you. (Chat: {chatId})";
-                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Start"));
+                            replyMarkup = new ReplyKeyboardMarkup(new KeyboardButton("Start")) { ResizeKeyboard = true };
                         }
                         else
                         {
