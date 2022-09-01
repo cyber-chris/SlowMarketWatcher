@@ -135,7 +135,7 @@ namespace SlowMarketWatcher
             _schedulerFactory = schedulerFactory;
             _marketDataEvent = marketDataEvent;
             ApiKey = alphaVantageSecret.Value.ApiKey ?? throw new ArgumentNullException();
-            symbols = new[] { "VEA", "VOO" };
+            symbols = new[] { "VGK", "VOO" };
         }
 
         protected override async Task ExecuteAsync(CancellationToken token)
